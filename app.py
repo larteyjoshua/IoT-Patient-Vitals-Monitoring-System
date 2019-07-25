@@ -12,7 +12,7 @@ Author(s) :
 '''
 
 
-from flask import Flask, render_template, flash, redirect, request, jsonify, url_for, Response
+from flask import*
 # from aquaLite import *
 import datetime
 import json
@@ -23,6 +23,9 @@ from config import credential
 import generator
 from flask_toastr import Toastr     # toastr module import
 import create_database
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session,sessionmaker
+from passlib.hash import sha256_crypt
 
 
 app = Flask(__name__)
@@ -33,6 +36,9 @@ toastr = Toastr(app)
 # Set the secret_key on the application to something unique and secret.
 app.config['SECRET_KEY'] = '5791628bb0b13ce0c676dfde280ba245'
 
+@app.route('/')
+def index():
+    return render_template("index.html")
 
 @app.route('/records')
 def records():
@@ -40,24 +46,61 @@ def records():
 
 
 # home route....landing page
-@app.route("/", methods = ['GET', 'POST'])
-@app.route("/index", methods=["GET", "POST"])
-def index():
-    print("landing page running...")
-    if request.method == 'POST':
-        username = request.form['username']
-        passwd = request.form['password']
+engine = create_engine('sqlite:///iot_wqms_data.db')
+db=scoped_session(sessionmaker(bind=engine))
 
-        # credentials from config files imported
-        if username == credential['name'] and passwd == credential['passwd']:
-            flash('Login successful :)', 'success')
-            # flash("You have successfully logged in.", 'success')    # python Toastr uses flash to flash pages
-            return redirect(url_for('dashboard')) 
+@app.route("/register",methods=["GET","POST"])
+def registered():
+    if request.method=="POST":
+        name=request.form.get("name")
+        email=request.form.get("email")
+        ml_number =request.form.get("ml_number")
+        password=request.form.get("password")
+        confirm=request.form.get("confirm")
+        secure_password=sha256_crypt.encrypt(str(password))
+
+        print(name)
+
+        usernamedata=db.execute("SELECT email FROM users WHERE email=:email",{"email":email}).fetchone()
+        #usernamedata=str(usernamedata)
+        if usernamedata==None:
+            if password==confirm:
+                db.execute("INSERT INTO users(name,email, ml_number, password) VALUES(:name,:email,:ml_number, :password)",
+                    {"name":name,"email":email,"ml_number":ml_number, "password":secure_password})
+                db.commit()
+                flash("You are registered and can now login","success")
+                return redirect(url_for('index'))
+            else:
+                flash("password does not match","danger")
+                return render_template('register.html')
         else:
-            flash('Login Unsuccessful. Please check username and password', 'error')
+            flash("user already existed, please login or contact admin","danger")
+            return redirect(url_for('login'))
 
-    return render_template("index.html", todayDate=datetime.date.today(), )
+    return render_template('register.html')
 
+@app.route("/login",methods=["GET","POST"])
+def login():
+    if request.method=="POST":
+        email=request.form.get("email")
+        password=request.form.get("password")
+        usernamedata=db.execute("SELECT email FROM users WHERE email=:email",{"email":email}).fetchone()
+        passworddata=db.execute("SELECT password FROM users WHERE email=:email",{"email":email}).fetchone()
+
+        if usernamedata is None:
+            flash("No User","danger")
+            return render_template('register.html')
+        else:
+            for passwor_data in passworddata:
+                if sha256_crypt.verify(password,passwor_data):
+                    session["log"]=True
+                    flash("You are now logged in!!","success")
+                    return redirect(url_for('dashboard'))
+                else:
+                    return render_template('index.html')
+                    flash("incorrect password","danger")
+
+    return render_template('index.html')
 
 
 
